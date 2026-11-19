@@ -1,0 +1,108 @@
+{
+  "info": {
+    "name": "ShopSphere — Stage 1 API",
+    "description": "Run 'Login (customer)' first; it stores the token. 'Products' stores the first product id. 'Create order' uses {{idempotencyKey}} — run 'New idempotency key' to generate a fresh one, or re-send 'Create order' unchanged to demonstrate duplicate protection.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api" },
+    { "key": "token", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "idempotencyKey", "value": "" },
+    { "key": "orderId", "value": "" }
+  ],
+  "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }] },
+  "item": [
+    { "name": "Health", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/health" } },
+    {
+      "name": "Register",
+      "request": {
+        "auth": { "type": "noauth" }, "method": "POST", "url": "{{baseUrl}}/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"Demo Customer\",\n  \"email\": \"demo.customer@example.com\",\n  \"password\": \"Secret123\"\n}" }
+      }
+    },
+    {
+      "name": "Login (customer)",
+      "event": [{ "listen": "test", "script": { "exec": ["const d = pm.response.json().data;", "if (d && d.token) pm.collectionVariables.set('token', d.token);"] } }],
+      "request": {
+        "auth": { "type": "noauth" }, "method": "POST", "url": "{{baseUrl}}/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"email\": \"demo.customer@example.com\",\n  \"password\": \"Secret123\"\n}" }
+      }
+    },
+    { "name": "Me", "request": { "method": "GET", "url": "{{baseUrl}}/auth/me" } },
+    {
+      "name": "Products",
+      "event": [{ "listen": "test", "script": { "exec": ["const p = pm.response.json().data.products;", "if (p && p.length) pm.collectionVariables.set('productId', p[0].id);"] } }],
+      "request": { "auth": { "type": "noauth" }, "method": "GET", "url": { "raw": "{{baseUrl}}/products?page=1&limit=12&sort=newest", "host": ["{{baseUrl}}"], "path": ["products"], "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "12" }, { "key": "sort", "value": "newest" }] } }
+    },
+    { "name": "Product by id", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/products/{{productId}}" } },
+    { "name": "Categories", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/products/categories" } },
+    { "name": "Cart", "request": { "method": "GET", "url": "{{baseUrl}}/cart" } },
+    {
+      "name": "Cart add",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/cart/add",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 1\n}" }
+      }
+    },
+    {
+      "name": "New idempotency key",
+      "event": [{ "listen": "prerequest", "script": { "exec": ["pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));", "console.log('New Idempotency-Key:', pm.collectionVariables.get('idempotencyKey'));"] } }],
+      "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/health" }
+    },
+    {
+      "name": "Create order (idempotent)",
+      "event": [
+        { "listen": "prerequest", "script": { "exec": ["if (!pm.collectionVariables.get('idempotencyKey')) pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"] } },
+        { "listen": "test", "script": { "exec": ["const b = pm.response.json();", "if (b.data && b.data.order) pm.collectionVariables.set('orderId', b.data.order.id);", "console.log('status', pm.response.code, 'replayed:', pm.response.headers.get('Idempotent-Replayed') || false);"] } }
+      ],
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/orders",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+        ],
+        "body": { "mode": "raw", "raw": "{\n  \"items\": [{ \"productId\": \"{{productId}}\", \"quantity\": 1 }],\n  \"shippingAddress\": {\n    \"fullName\": \"Demo Customer\",\n    \"phone\": \"9876543210\",\n    \"addressLine1\": \"12 MG Road\",\n    \"city\": \"Bengaluru\",\n    \"state\": \"Karnataka\",\n    \"postalCode\": \"560001\",\n    \"country\": \"India\"\n  }\n}" }
+      }
+    },
+    {
+      "name": "Create order — SAME key, DIFFERENT payload (expect 409)",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/orders",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+        ],
+        "body": { "mode": "raw", "raw": "{\n  \"items\": [{ \"productId\": \"{{productId}}\", \"quantity\": 2 }],\n  \"shippingAddress\": {\n    \"fullName\": \"Demo Customer\",\n    \"phone\": \"9876543210\",\n    \"addressLine1\": \"12 MG Road\",\n    \"city\": \"Bengaluru\",\n    \"state\": \"Karnataka\",\n    \"postalCode\": \"560001\",\n    \"country\": \"India\"\n  }\n}" }
+      }
+    },
+    { "name": "My orders", "request": { "method": "GET", "url": "{{baseUrl}}/orders" } },
+    { "name": "Order by id", "request": { "method": "GET", "url": "{{baseUrl}}/orders/{{orderId}}" } },
+    {
+      "name": "Login (admin)",
+      "event": [{ "listen": "test", "script": { "exec": ["const d = pm.response.json().data;", "if (d && d.token) pm.collectionVariables.set('adminToken', d.token);"] } }],
+      "request": {
+        "auth": { "type": "noauth" }, "method": "POST", "url": "{{baseUrl}}/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"email\": \"<ADMIN_EMAIL from backend/.env>\",\n  \"password\": \"<ADMIN_PASSWORD>\"\n}" }
+      }
+    },
+    {
+      "name": "Admin overview",
+      "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}/admin/overview" }
+    },
+    {
+      "name": "Admin create product",
+      "request": {
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+        "method": "POST", "url": "{{baseUrl}}/products",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"USB-C Hub 7-in-1\",\n  \"description\": \"HDMI, USB 3.0 and card reader\",\n  \"price\": 1999,\n  \"category\": \"Electronics\",\n  \"image\": \"/images/products/electronics.svg\",\n  \"stock\": 25\n}" }
+      }
+    }
+  ]
+}

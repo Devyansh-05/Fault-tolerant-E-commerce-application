@@ -1,0 +1,46 @@
+# Infrastructure only. The React frontend, Node.js API, Outbox Publisher and consumers run
+# directly on the host. MongoDB is MongoDB Atlas (cloud).
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: ecommerce-redis
+    restart: unless-stopped
+    # Append-only file persistence so idempotency records survive a container restart.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      # Bound to localhost only: Redis is not reachable from other machines on the network.
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.1-management-alpine
+    container_name: ecommerce-rabbitmq
+    # A fixed hostname keeps the node name (and therefore the data directory) stable across restarts.
+    hostname: ecommerce-rabbitmq
+    restart: unless-stopped
+    environment:
+      # Local development credentials only (the broker is bound to 127.0.0.1).
+      # The built-in "guest" user cannot log in from outside the container, so a dev user is created.
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ecommerce}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-ecommerce_dev}
+    ports:
+      - "127.0.0.1:5672:5672"     # AMQP (used by the backend)
+      - "127.0.0.1:15672:15672"   # Management UI: http://localhost:15672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  redis-data:
+  rabbitmq-data:
